@@ -1,0 +1,51 @@
+/* ==========================================================================
+   Responsive breakpoints — 1920 / 1440 / 1024 / 768 / 390 / 375
+   ========================================================================== */
+
+@media (max-width: 1200px) {
+  .hub-grid { grid-template-columns: repeat(2, 1fr); }
+  .game-card-featured { grid-column: span 2; }
+  .features-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 1024px) {
+  main > section { padding: 96px 24px; }
+  .breach { grid-template-columns: 1fr; text-align: left; gap: 40px; }
+  .breach-visual { max-width: 300px; margin: 0 auto; }
+  .arsenal-grid, .threats-grid { grid-template-columns: repeat(2, 1fr); }
+  .status-card { right: 4%; bottom: 8%; }
+}
+
+@media (max-width: 900px) {
+  .nav-links { display: none; }
+  .hamburger { display: flex; }
+  .mobile-menu { display: flex; }
+}
+
+@media (max-width: 768px) {
+  :root { --nav-h: 66px; }
+  .nav-inner { padding: 0 18px; }
+  .nav-play { display: none; }
+  .hero { padding: calc(var(--nav-h) + 24px) 20px 64px; }
+  .hero-title { font-size: clamp(2.6rem, 12vw, 4rem); }
+  .status-card { position: static; margin: 32px auto 0; width: fit-content; animation: none; }
+  main > section { padding: 76px 20px; }
+  .hub-grid, .arsenal-grid, .threats-grid, .features-grid { grid-template-columns: 1fr; }
+  .game-card-featured { grid-column: span 1; grid-template-columns: 1fr; }
+  .game-card-featured .game-card-media { min-height: 200px; }
+  .leaderboard-panel { overflow-x: auto; }
+  .leaderboard-table { min-width: 560px; }
+  .final-cta { padding: 96px 20px !important; }
+}
+
+@media (max-width: 480px) {
+  .hero-actions { flex-direction: column; width: 100%; }
+  .hero-actions .btn { width: 100%; }
+  .footer-inner { align-items: flex-start; }
+}
+
+@media (max-width: 400px) {
+  .hero-title { font-size: 2.3rem; }
+  .hero-subtitle { font-size: 1.05rem; }
+  main > section h2 { font-size: 1.6rem; }
+}

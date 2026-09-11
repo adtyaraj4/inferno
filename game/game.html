@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>INFERNO // PROTOCOL — Mission: Breach Sector 07</title>
+<meta name="description" content="Play INFERNO // PROTOCOL, an original browser-based retro FPS.">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/game.css">
+<link rel="stylesheet" href="../css/responsive.css">
+</head>
+<body class="game-body">
+
+<div id="gameRoot" class="game-root">
+
+  <!-- ============ 3D CANVAS ============ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- ============ LOADING ============ -->
+  <div class="overlay loading-overlay" id="loadingOverlay">
+    <p class="overlay-kicker">Inferno // Protocol</p>
+    <h1 class="loading-title">Establishing uplink&hellip;</h1>
+    <div class="loading-bar"><div class="loading-bar-fill" id="loadingBarFill"></div></div>
+  </div>
+
+  <!-- ============ MAIN MENU ============ -->
+  <div class="overlay menu-overlay" id="mainMenu" hidden>
+    <a href="../index.html" class="btn btn-pill btn-ghost back-to-hub" id="backToHubTop">&larr; Hub</a>
+    <p class="overlay-kicker">Inferno // Protocol</p>
+    <h1 class="menu-title">Mission: Breach Sector 07</h1>
+    <p class="menu-mission">Descend into Ashfall Complex. Survive the waves. Hold Sector 07.</p>
+    <div class="menu-actions">
+      <button class="btn btn-pill btn-primary btn-lg" id="startMissionBtn">Start Mission</button>
+      <button class="btn btn-pill btn-ghost btn-lg" id="controlsBtn">Controls</button>
+      <a href="../index.html" class="btn btn-pill btn-outline btn-lg" id="backToHubBtn">Back to Hub</a>
+    </div>
+    <p class="menu-hint">This mission uses mouse-look. Click Start, then click the screen to lock your cursor.</p>
+  </div>
+
+  <!-- ============ CONTROLS MODAL ============ -->
+  <div class="overlay controls-overlay" id="controlsModal" hidden>
+    <div class="controls-panel">
+      <button class="modal-close" id="closeControlsBtn" aria-label="Close controls">&times;</button>
+      <h2>Controls</h2>
+      <ul class="controls-list">
+        <li><span class="key">W A S D</span><span>Move</span></li>
+        <li><span class="key">Shift</span><span>Sprint</span></li>
+        <li><span class="key">Space</span><span>Jump</span></li>
+        <li><span class="key">Mouse</span><span>Aim</span></li>
+        <li><span class="key">Left Click</span><span>Fire</span></li>
+        <li><span class="key">R</span><span>Reload</span></li>
+        <li><span class="key">Esc</span><span>Pause</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ PAUSE MENU ============ -->
+  <div class="overlay pause-overlay" id="pauseMenu" hidden>
+    <h2>Paused</h2>
+    <div class="menu-actions">
+      <button class="btn btn-pill btn-primary btn-lg" id="resumeBtn">Resume</button>
+      <button class="btn btn-pill btn-ghost btn-lg" id="pauseControlsBtn">Controls</button>
+      <a href="../index.html" class="btn btn-pill btn-outline btn-lg">Back to Hub</a>
+    </div>
+  </div>
+
+  <!-- ============ DEATH OVERLAY ============ -->
+  <div class="overlay death-overlay" id="deathOverlay" hidden>
+    <h1 class="death-title">You Died</h1>
+    <p class="death-stats" id="deathStats">Score: 0 &middot; Kills: 0 &middot; Wave: 1</p>
+
+    <form class="score-form" id="scoreForm">
+      <label for="playerNameInput">Callsign</label>
+      <input type="text" id="playerNameInput" maxlength="12" placeholder="OPERATIVE" autocomplete="off">
+      <button type="submit" class="btn btn-pill btn-primary">Submit Score</button>
+    </form>
+
+    <div class="menu-actions">
+      <button class="btn btn-pill btn-primary btn-lg" id="restartBtn">Restart</button>
+      <a href="../index.html" class="btn btn-pill btn-outline btn-lg">Back to Hub</a>
+    </div>
+  </div>
+
+  <!-- ============ HUD (in-game only) ============ -->
+  <div class="hud" id="hud" hidden>
+    <div class="hud-top">
+      <div class="hud-stat"><span class="hud-label">Score</span><span class="hud-value" id="hudScore">0</span></div>
+      <div class="hud-stat"><span class="hud-label">Kills</span><span class="hud-value" id="hudKills">0</span></div>
+      <div class="hud-stat"><span class="hud-label">Wave</span><span class="hud-value" id="hudWave">1</span></div>
+    </div>
+
+    <div class="hud-crosshair" id="crosshair" aria-hidden="true">
+      <span></span><span></span><span></span><span></span>
+    </div>
+
+    <div class="hud-wave-banner" id="waveBanner" aria-hidden="true"></div>
+
+    <div class="hud-bottom">
+      <div class="hud-vitals">
+        <div class="vital-row"><span class="vital-label">HP</span>
+          <div class="vital-bar"><div class="vital-bar-fill hp-fill" id="hpFill"></div></div>
+        </div>
+        <div class="vital-row"><span class="vital-label">ARM</span>
+          <div class="vital-bar"><div class="vital-bar-fill armor-fill" id="armorFill"></div></div>
+        </div>
+      </div>
+
+      <div class="hud-weapon" id="hudWeapon">
+        <span class="weapon-name" id="weaponName">Pulse Rifle</span>
+      </div>
+
+      <div class="hud-ammo">
+        <span class="hud-value" id="hudAmmo">24</span><span class="hud-ammo-sep">/</span><span class="hud-value-sm" id="hudReserve">96</span>
+      </div>
+    </div>
+
+    <div class="damage-vignette" id="damageVignette" aria-hidden="true"></div>
+    <div class="reload-indicator" id="reloadIndicator" hidden>Reloading&hellip;</div>
+  </div>
+
+  <!-- ============ MOBILE TOUCH CONTROLS ============ -->
+  <div class="touch-controls" id="touchControls" hidden>
+    <div class="touch-joystick" id="touchJoystick">
+      <div class="touch-joystick-knob" id="touchJoystickKnob"></div>
+    </div>
+    <div class="touch-look" id="touchLook"></div>
+    <div class="touch-buttons">
+      <button class="touch-btn touch-btn-jump" id="touchJump" aria-label="Jump">JUMP</button>
+      <button class="touch-btn touch-btn-reload" id="touchReload" aria-label="Reload">RLD</button>
+      <button class="touch-btn touch-btn-fire" id="touchFire" aria-label="Fire">FIRE</button>
+    </div>
+  </div>
+
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module" src="../js/game/Game.js"></script>
+</body>
+</html>

@@ -1,0 +1,170 @@
+/* ==========================================================================
+   INFERNO // PROTOCOL — Game UI (HUD, menus, touch controls)
+   ========================================================================== */
+
+html, body.game-body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: #000; color: var(--c-text); font-family: var(--f-body);
+}
+
+.game-root { position: fixed; inset: 0; }
+
+#gameCanvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; outline: none; touch-action: none;
+}
+
+/* ---------- Shared overlay panel ---------- */
+.overlay {
+  position: absolute; inset: 0; z-index: 50;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: 32px;
+  background: radial-gradient(ellipse at 50% 30%, rgba(28,15,20,0.92), rgba(5,4,6,0.97));
+  backdrop-filter: blur(4px);
+}
+.overlay[hidden] { display: none; }
+.overlay-kicker {
+  font-family: var(--f-display); color: var(--c-fire-soft); font-size: 0.82rem;
+  letter-spacing: 0.28em; margin-bottom: 14px;
+}
+.back-to-hub { position: absolute; top: 26px; left: 26px; padding: 0.55em 1.3em; font-size: 0.85rem; }
+
+/* ---------- Loading ---------- */
+.loading-title { font-size: clamp(1.6rem, 4vw, 2.4rem); margin-bottom: 30px; }
+.loading-bar { width: min(360px, 70vw); height: 4px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; }
+.loading-bar-fill {
+  height: 100%; width: 0%; border-radius: 4px;
+  background: linear-gradient(90deg, var(--c-crimson-2), var(--c-fire));
+  transition: width 0.25s ease;
+}
+
+/* ---------- Main menu ---------- */
+.menu-title { font-size: clamp(1.8rem, 4.5vw, 2.8rem); margin-bottom: 14px; }
+.menu-mission { max-width: 480px; margin: 0 auto 34px; }
+.menu-actions { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+.menu-hint { margin-top: 28px; font-size: 0.85rem; color: var(--c-text-dim); max-width: 420px; }
+
+/* ---------- Controls modal ---------- */
+.controls-overlay { z-index: 90; background: rgba(5,4,6,0.88); }
+.controls-panel {
+  position: relative; background: var(--c-charcoal); border: 1px solid var(--c-line);
+  border-radius: var(--radius-card); padding: 36px 40px; max-width: 420px; width: 100%;
+}
+.controls-panel h2 { margin-bottom: 22px; }
+.controls-list { display: flex; flex-direction: column; gap: 14px; }
+.controls-list li { display: flex; justify-content: space-between; align-items: center; font-size: 0.98rem; }
+.controls-list .key {
+  font-family: var(--f-display); font-weight: 600; color: #fff;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--c-line);
+  border-radius: 6px; padding: 4px 12px; font-size: 0.85rem;
+}
+.modal-close {
+  position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid var(--c-line); background: rgba(255,255,255,0.04); color: #fff; font-size: 1.2rem;
+}
+
+/* ---------- Pause ---------- */
+.pause-overlay { z-index: 80; }
+.pause-overlay h2 { font-size: 2rem; margin-bottom: 28px; }
+
+/* ---------- Death ---------- */
+.death-overlay { z-index: 85; }
+.death-title { font-size: clamp(2.4rem, 7vw, 4rem); color: var(--c-crimson-2); text-shadow: 0 0 40px rgba(217,43,60,0.6); margin-bottom: 12px; }
+.death-stats { font-family: var(--f-display); margin-bottom: 26px; color: var(--c-text-muted); }
+.score-form { display: flex; gap: 10px; margin-bottom: 30px; flex-wrap: wrap; justify-content: center; }
+.score-form input {
+  background: rgba(255,255,255,0.04); border: 1px solid var(--c-line); border-radius: var(--radius-pill);
+  padding: 0.7em 1.2em; color: #fff; font-family: var(--f-display); letter-spacing: 0.05em;
+  width: 200px; text-align: center;
+}
+.score-form input:focus { outline: 2px solid var(--c-fire-soft); }
+
+/* ---------- HUD ---------- */
+.hud { position: absolute; inset: 0; z-index: 30; pointer-events: none; font-family: var(--f-display); }
+.hud-top {
+  position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 28px; background: rgba(8,7,10,0.55); border: 1px solid var(--c-line);
+  border-radius: var(--radius-pill); padding: 10px 26px; backdrop-filter: blur(6px);
+}
+.hud-stat { display: flex; flex-direction: column; align-items: center; min-width: 56px; }
+.hud-label { font-size: 0.62rem; letter-spacing: 0.14em; color: var(--c-text-dim); }
+.hud-value { font-size: 1.1rem; font-weight: 700; color: #fff; }
+.hud-value-sm { font-size: 0.95rem; color: var(--c-text-muted); }
+
+.hud-crosshair {
+  position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; transform: translate(-50%,-50%);
+}
+.hud-crosshair span {
+  position: absolute; background: rgba(255,255,255,0.85); box-shadow: 0 0 3px rgba(0,0,0,0.6);
+}
+.hud-crosshair span:nth-child(1), .hud-crosshair span:nth-child(2) { width: 2px; height: 7px; left: 9px; }
+.hud-crosshair span:nth-child(1) { top: 0; }
+.hud-crosshair span:nth-child(2) { bottom: 0; }
+.hud-crosshair span:nth-child(3), .hud-crosshair span:nth-child(4) { height: 2px; width: 7px; top: 9px; }
+.hud-crosshair span:nth-child(3) { left: 0; }
+.hud-crosshair span:nth-child(4) { right: 0; }
+
+.hud-wave-banner {
+  position: absolute; top: 30%; left: 50%; transform: translate(-50%,-50%);
+  font-size: 1.6rem; letter-spacing: 0.16em; color: var(--c-fire-soft);
+  text-shadow: 0 0 24px rgba(255,122,48,0.6); opacity: 0; transition: opacity 0.4s, transform 0.4s;
+}
+.hud-wave-banner.is-visible { opacity: 1; transform: translate(-50%,-50%) scale(1.05); }
+
+.hud-bottom {
+  position: absolute; bottom: 22px; left: 22px; right: 22px;
+  display: flex; align-items: flex-end; justify-content: space-between;
+}
+.hud-vitals { display: flex; flex-direction: column; gap: 8px; min-width: 180px; }
+.vital-row { display: flex; align-items: center; gap: 10px; }
+.vital-label { font-size: 0.72rem; color: var(--c-text-dim); width: 30px; }
+.vital-bar { flex: 1; height: 8px; background: rgba(255,255,255,0.08); border-radius: 6px; overflow: hidden; }
+.vital-bar-fill { height: 100%; border-radius: 6px; transition: width 0.25s ease; }
+.hp-fill { background: linear-gradient(90deg, var(--c-crimson), var(--c-crimson-2)); width: 100%; }
+.armor-fill { background: linear-gradient(90deg, #3a6a8a, #6fb3d5); width: 100%; }
+
+.hud-weapon { text-align: center; }
+.weapon-name { font-size: 0.95rem; color: var(--c-text-muted); letter-spacing: 0.06em; }
+
+.hud-ammo { font-size: 1.5rem; font-weight: 700; color: #fff; }
+.hud-ammo-sep { color: var(--c-text-dim); margin: 0 4px; font-weight: 400; }
+
+.damage-vignette {
+  position: absolute; inset: 0; pointer-events: none;
+  box-shadow: inset 0 0 140px 30px rgba(217,43,60,0);
+  transition: box-shadow 0.15s ease;
+}
+.damage-vignette.is-hit { box-shadow: inset 0 0 160px 40px rgba(217,43,60,0.65); }
+
+.reload-indicator {
+  position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
+  font-size: 0.85rem; letter-spacing: 0.1em; color: var(--c-fire-soft);
+}
+
+/* ---------- Touch controls (mobile only) ---------- */
+.touch-controls { position: absolute; inset: 0; z-index: 40; pointer-events: none; }
+.touch-joystick {
+  position: absolute; left: 26px; bottom: 26px; width: 120px; height: 120px;
+  border-radius: 50%; background: rgba(255,255,255,0.06); border: 1px solid var(--c-line);
+  pointer-events: auto; touch-action: none;
+}
+.touch-joystick-knob {
+  position: absolute; top: 50%; left: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px;
+  border-radius: 50%; background: rgba(255,122,48,0.55); border: 1px solid rgba(255,255,255,0.3);
+}
+.touch-look { position: absolute; right: 0; top: 0; bottom: 140px; width: 55%; pointer-events: auto; touch-action: none; }
+.touch-buttons {
+  position: absolute; right: 22px; bottom: 22px; display: grid;
+  grid-template-columns: repeat(2, 64px); gap: 12px; pointer-events: auto;
+}
+.touch-btn {
+  width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--c-line);
+  background: rgba(255,255,255,0.07); color: #fff; font-family: var(--f-display);
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
+}
+.touch-btn-fire { grid-column: 1 / span 2; background: rgba(217,43,60,0.4); width: 100%; border-radius: 999px; }
+.touch-btn:active { background: rgba(255,122,48,0.5); }
+
+@media (min-width: 901px) and (pointer: fine) {
+  .touch-controls { display: none !important; }
+}

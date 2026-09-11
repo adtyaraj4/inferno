@@ -1,0 +1,412 @@
+// Game.js — orchestrates the Three.js scene, input, waves, HUD, and menus.
+import * as THREE from 'three';
+import { Level } from './Level.js';
+import { Player } from './Player.js';
+import { Weapon } from './Weapon.js';
+import { Enemy, ENEMY_TYPES } from './Enemy.js';
+import { updateEnemyAI } from './EnemyAI.js';
+import { resolveShot, resolvePickups } from './Combat.js';
+import { ParticleSystem } from './ParticleSystem.js';
+import { HUD } from './HUD.js';
+import { AudioManager } from './AudioManager.js';
+import { submitScore } from '../leaderboard.js';
+
+const MAX_DT = 1 / 20; // clamp huge frame gaps (tab switches, slow devices)
+const ENEMY_TYPE_KEYS = Object.keys(ENEMY_TYPES);
+
+class InfernoGame {
+  constructor() {
+    this.canvas = document.getElementById('gameCanvas');
+    this.dom = {
+      loading: document.getElementById('loadingOverlay'),
+      loadingFill: document.getElementById('loadingBarFill'),
+      mainMenu: document.getElementById('mainMenu'),
+      controlsModal: document.getElementById('controlsModal'),
+      pauseMenu: document.getElementById('pauseMenu'),
+      deathOverlay: document.getElementById('deathOverlay'),
+      deathStats: document.getElementById('deathStats'),
+      scoreForm: document.getElementById('scoreForm'),
+      nameInput: document.getElementById('playerNameInput'),
+      touchControls: document.getElementById('touchControls'),
+    };
+
+    this.state = 'loading'; // loading | menu | playing | paused | dead
+    this.clock = new THREE.Clock();
+    this.audio = new AudioManager();
+
+    this.score = 0;
+    this.kills = 0;
+    this.wave = 0;
+    this.enemies = [];
+    this.enemiesRemainingToSpawn = 0;
+    this.spawnTimer = 0;
+    this.waveActive = false;
+
+    this._initRenderer();
+    this._initScene();
+    this._initInput();
+    this._bindMenus();
+    this._runLoadingSequence();
+
+    window.addEventListener('resize', () => this._onResize());
+  }
+
+  /* ---------------------------------------------------------------- setup */
+
+  _initRenderer() {
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.shadowMap.enabled = false; // perf: fake shading via emissive/point lights instead
+
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 120);
+  }
+
+  _initScene() {
+    this.level = new Level(this.scene);
+    this.player = new Player(this.camera, this.level);
+    this.particles = new ParticleSystem(this.scene);
+    this.weapon = new Weapon(this.camera, this.particles, this.audio, 'pulse');
+    this.hud = new HUD();
+  }
+
+  _onResize() {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  _runLoadingSequence() {
+    let pct = 0;
+    const tick = () => {
+      pct += 8 + Math.random() * 18;
+      this.dom.loadingFill.style.width = `${Math.min(100, pct)}%`;
+      if (pct < 100) {
+        setTimeout(tick, 110);
+      } else {
+        setTimeout(() => {
+          this.dom.loading.hidden = true;
+          this._showMenu();
+        }, 200);
+      }
+    };
+    tick();
+  }
+
+  /* ----------------------------------------------------------------- input */
+
+  _initInput() {
+    this.keys = new Set();
+    this.mouseDown = false;
+
+    window.addEventListener('keydown', (e) => {
+      this.keys.add(e.code);
+      if (this.state === 'playing') {
+        if (e.code === 'KeyR') this.weapon.startReload();
+        if (e.code === 'Escape') this._togglePause();
+      }
+      this._syncMoveInput();
+    });
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      this._syncMoveInput();
+    });
+
+    this.canvas.addEventListener('mousedown', () => { this.mouseDown = true; });
+    window.addEventListener('mouseup', () => { this.mouseDown = false; });
+
+    document.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement === this.canvas && this.state === 'playing') {
+        this.player.applyLook(e.movementX, e.movementY);
+      }
+    });
+
+    this.canvas.addEventListener('click', () => {
+      if (this.state === 'playing' && document.pointerLockElement !== this.canvas) {
+        this.canvas.requestPointerLock();
+      }
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement !== this.canvas && this.state === 'playing') {
+        this._pause();
+      }
+    });
+
+    this._initTouchControls();
+  }
+
+  _syncMoveInput() {
+    const p = this.player;
+    if (!p) return;
+    let forward = 0, right = 0;
+    if (this.keys.has('KeyW') || this.touch.forward > 0) forward += 1;
+    if (this.keys.has('KeyS')) forward -= 1;
+    if (this.keys.has('KeyD')) right += 1;
+    if (this.keys.has('KeyA')) right -= 1;
+    if (this.touch.active) { forward = this.touch.forward; right = this.touch.right; }
+    p.input.forward = forward;
+    p.input.right = right;
+    p.input.sprint = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.touch.sprint;
+    if (this.keys.has('Space')) p.requestJump();
+  }
+
+  _initTouchControls() {
+    this.touch = { active: false, forward: 0, right: 0, sprint: false, firing: false, look: { id: null, x: 0, y: 0 } };
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    if (!isTouch) return;
+
+    this.dom.touchControls.hidden = false;
+
+    const joystick = document.getElementById('touchJoystick');
+    const knob = document.getElementById('touchJoystickKnob');
+    let joyId = null, joyOrigin = { x: 0, y: 0 };
+
+    joystick.addEventListener('touchstart', (e) => {
+      const t = e.changedTouches[0];
+      joyId = t.identifier;
+      const rect = joystick.getBoundingClientRect();
+      joyOrigin = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      this.touch.active = true;
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === joyId) {
+          const dx = t.clientX - joyOrigin.x;
+          const dy = t.clientY - joyOrigin.y;
+          const max = 46;
+          const len = Math.min(max, Math.hypot(dx, dy));
+          const ang = Math.atan2(dy, dx);
+          const nx = Math.cos(ang) * len, ny = Math.sin(ang) * len;
+          knob.style.transform = `translate(${nx}px, ${ny}px)`;
+          this.touch.forward = -ny / max;
+          this.touch.right = nx / max;
+          this.touch.sprint = len > max * 0.85;
+        }
+        if (t.identifier === this.touch.look.id) {
+          const dx = t.clientX - this.touch.look.x;
+          const dy = t.clientY - this.touch.look.y;
+          this.touch.look.x = t.clientX;
+          this.touch.look.y = t.clientY;
+          if (this.state === 'playing') this.player.applyLook(dx * 2.2, dy * 2.2);
+        }
+      }
+      this._syncMoveInput();
+    }, { passive: true });
+
+    window.addEventListener('touchend', (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === joyId) {
+          joyId = null;
+          knob.style.transform = 'translate(0,0)';
+          this.touch.forward = 0; this.touch.right = 0; this.touch.sprint = false;
+        }
+        if (t.identifier === this.touch.look.id) this.touch.look.id = null;
+      }
+      this._syncMoveInput();
+    });
+
+    const lookPad = document.getElementById('touchLook');
+    lookPad.addEventListener('touchstart', (e) => {
+      const t = e.changedTouches[0];
+      this.touch.look.id = t.identifier;
+      this.touch.look.x = t.clientX;
+      this.touch.look.y = t.clientY;
+    }, { passive: true });
+
+    document.getElementById('touchFire').addEventListener('touchstart', (e) => { e.preventDefault(); this.touch.firing = true; }, { passive: false });
+    document.getElementById('touchFire').addEventListener('touchend', () => { this.touch.firing = false; });
+    document.getElementById('touchJump').addEventListener('touchstart', (e) => { e.preventDefault(); this.player?.requestJump(); }, { passive: false });
+    document.getElementById('touchReload').addEventListener('touchstart', (e) => { e.preventDefault(); this.weapon?.startReload(); }, { passive: false });
+  }
+
+  /* ------------------------------------------------------------------ menus */
+
+  _bindMenus() {
+    document.getElementById('startMissionBtn').addEventListener('click', () => { this.audio.unlock(); this.audio.menuClick(); this._startMission(); });
+    document.getElementById('controlsBtn').addEventListener('click', () => this._showControls());
+    document.getElementById('pauseControlsBtn').addEventListener('click', () => this._showControls());
+    document.getElementById('closeControlsBtn').addEventListener('click', () => { this.dom.controlsModal.hidden = true; });
+    document.getElementById('resumeBtn').addEventListener('click', () => this._resume());
+    document.getElementById('restartBtn').addEventListener('click', () => this._startMission());
+
+    this.dom.scoreForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      submitScore({ name: this.dom.nameInput.value, score: this.score, kills: this.kills, wave: this.wave });
+      this.dom.scoreForm.querySelector('button').textContent = 'Saved ✓';
+      this.dom.scoreForm.querySelector('button').disabled = true;
+    });
+  }
+
+  _showMenu() {
+    this.state = 'menu';
+    this.dom.mainMenu.hidden = false;
+    this.hud.hide();
+  }
+
+  _showControls() {
+    this.dom.controlsModal.hidden = false;
+  }
+
+  _startMission() {
+    // reset state
+    this.dom.mainMenu.hidden = true;
+    this.dom.pauseMenu.hidden = true;
+    this.dom.deathOverlay.hidden = true;
+    this.dom.scoreForm.querySelector('button').disabled = false;
+    this.dom.scoreForm.querySelector('button').textContent = 'Submit Score';
+    this.dom.nameInput.value = '';
+
+    for (const e of this.enemies) e.dispose();
+    this.enemies = [];
+    this.score = 0;
+    this.kills = 0;
+    this.wave = 0;
+    this.waveActive = false;
+
+    this.player.health = this.player.maxHealth;
+    this.player.armor = 50;
+    this.player.position.set(0, 1.7, 10);
+    this.player.velocity.set(0, 0, 0);
+    this.player.yaw = Math.PI;
+    this.player.pitch = 0;
+    this.player.alive = true;
+
+    this.weapon.setWeapon('pulse');
+
+    this.state = 'playing';
+    this.hud.show();
+    this._nextWave();
+
+    if (!('ontouchstart' in window)) this.canvas.requestPointerLock();
+    this.clock.getDelta(); // discard time spent in menu
+  }
+
+  _togglePause() {
+    if (this.state === 'playing') this._pause();
+    else if (this.state === 'paused') this._resume();
+  }
+
+  _pause() {
+    if (this.state !== 'playing') return;
+    this.state = 'paused';
+    this.dom.pauseMenu.hidden = false;
+  }
+
+  _resume() {
+    this.state = 'playing';
+    this.dom.pauseMenu.hidden = true;
+    if (!('ontouchstart' in window)) this.canvas.requestPointerLock();
+    this.clock.getDelta();
+  }
+
+  _die() {
+    this.state = 'dead';
+    document.exitPointerLock?.();
+    this.audio.death();
+    this.dom.deathStats.textContent = `Score: ${Math.round(this.score).toLocaleString()} · Kills: ${this.kills} · Wave: ${this.wave}`;
+    this.dom.deathOverlay.hidden = false;
+    this.hud.hide();
+  }
+
+  /* ------------------------------------------------------------------ waves */
+
+  _nextWave() {
+    this.wave++;
+    this.waveActive = true;
+    this.enemiesRemainingToSpawn = 3 + this.wave * 2;
+    this.spawnTimer = 0;
+    this.audio.waveStart();
+    this.hud.showWaveBanner(`WAVE ${this.wave}`);
+  }
+
+  _spawnEnemy() {
+    const points = this.level.spawnPoints;
+    const spawn = points[Math.floor(Math.random() * points.length)];
+    const weights = this.wave < 2 ? ['VOID_CRAWLER'] : this.wave < 4 ? ['VOID_CRAWLER', 'ASH_HOUND'] : ENEMY_TYPE_KEYS;
+    const typeKey = weights[Math.floor(Math.random() * weights.length)];
+    const pos = new THREE.Vector3(spawn.x + (Math.random() - 0.5) * 2, 0, spawn.z + (Math.random() - 0.5) * 2);
+    const enemy = new Enemy(typeKey, this.scene, pos);
+    this.enemies.push(enemy);
+  }
+
+  /* ------------------------------------------------------------------- loop */
+
+  start() {
+    this.renderer.setAnimationLoop(() => this._tick());
+  }
+
+  _tick() {
+    const dt = Math.min(this.clock.getDelta(), MAX_DT);
+    const elapsed = this.clock.elapsedTime;
+
+    this.level.update(dt, elapsed);
+    this.particles.update(dt);
+
+    if (this.state === 'playing') {
+      this._updateGameplay(dt, elapsed);
+    }
+
+    for (const e of this.enemies) e.update(dt);
+    this.enemies = this.enemies.filter((e) => e.alive || e.deathT < 0.7);
+
+    this.hud.tick(dt);
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  _updateGameplay(dt, elapsed) {
+    this.player.update(dt);
+    if (!this.player.alive) { this._die(); return; }
+
+    const moving = Math.abs(this.player.input.forward) + Math.abs(this.player.input.right) > 0;
+    this.weapon.update(dt, moving);
+
+    const wantsFire = this.mouseDown || this.touch.firing;
+    if (wantsFire) {
+      const shot = this.weapon.tryFire();
+      const result = resolveShot(shot, this.enemies, this.particles, this.audio);
+      if (result?.killed) {
+        this.kills++;
+        this.score += result.enemy.type.scoreValue;
+      }
+    }
+
+    // enemy AI + attacks
+    for (const enemy of this.enemies) {
+      updateEnemyAI(enemy, this.player, this.level, dt, (dmg) => {
+        const alive = this.player.takeDamage(dmg);
+        this.hud.flashDamage();
+        this.audio.playerHurt();
+        if (!alive) this._die();
+      });
+    }
+
+    // pickups
+    const picked = resolvePickups(this.player, this.level, this.audio, elapsed);
+    for (const p of picked) {
+      if (p.kind === 'ammo') this.weapon.reserve = Math.min(this.weapon.def.reserveMax, this.weapon.reserve + Math.round(this.weapon.def.magSize * 1.5));
+    }
+
+    // wave spawning
+    if (this.waveActive) {
+      if (this.enemiesRemainingToSpawn > 0) {
+        this.spawnTimer -= dt;
+        if (this.spawnTimer <= 0) {
+          this._spawnEnemy();
+          this.enemiesRemainingToSpawn--;
+          this.spawnTimer = 0.9;
+        }
+      } else if (this.enemies.every((e) => !e.alive)) {
+        this.waveActive = false;
+        setTimeout(() => { if (this.state === 'playing') this._nextWave(); }, 2400);
+      }
+    }
+
+    this.hud.update({ score: this.score, kills: this.kills, wave: this.wave, player: this.player, weapon: this.weapon });
+  }
+}
+
+const game = new InfernoGame();
+game.start();
