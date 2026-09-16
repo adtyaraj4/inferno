@@ -56,7 +56,7 @@ export class Enemy {
   _buildMesh() {
     const group = new THREE.Group();
     const bodyMat = new THREE.MeshStandardMaterial({ color: this.type.color, roughness: 0.75, metalness: 0.2 });
-    const coreMat = new THREE.MeshStandardMaterial({ color: this.type.coreColor, emissive: this.type.coreColor, emissiveIntensity: 1.1, roughness: 0.3 });
+    const coreMat = new THREE.MeshStandardMaterial({ color: this.type.coreColor, emissive: this.type.coreColor, emissiveIntensity: 2.4, roughness: 0.28 });
     const limbMat = new THREE.MeshStandardMaterial({ color: this.type.color, roughness: 0.85, metalness: 0.1 });
 
     const torso = new THREE.Group();
@@ -146,6 +146,13 @@ export class Enemy {
 
     head.userData.isHead = true;
     group.add(torso);
+
+    // Small local glow makes every hostile readable in the dark without
+    // lighting the whole room. The radar can therefore correspond to an
+    // actually visible enemy once it enters the player's area.
+    const enemyLight = new THREE.PointLight(this.type.coreColor, 0.9, 5.5, 2.0);
+    enemyLight.position.y = this._bodyHeight() * 0.68;
+    group.add(enemyLight);
 
     group.userData.enemyId = this.id;
     group.traverse((o) => { o.userData.enemyId = this.id; });
