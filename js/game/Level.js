@@ -227,12 +227,16 @@ export class Level {
     this._pickupMarker(22, 0, 'health');
     this._pickupMarker(-22, 0, 'ammo');
 
-    // Enemy spawn points: corridors + room interiors, away from hall center
+    // Enemy spawn points. Keep every point inside the actual 4-unit-wide
+    // corridor floors; the previous build had several points sitting outside
+    // the corridor walls, so valid spawns could run out before Wave 1 finished.
+    // Twelve deterministic positions give the wave system enough room to spawn
+    // five hostiles while still keeping them distributed around the facility.
     this.spawnPoints = [
-      { x: 0, z: -24 }, { x: 0, z: 24 },
-      { x: 24, z: 0 }, { x: -24, z: 0 },
-      { x: 6, z: -18 }, { x: -6, z: 18 },
-      { x: 18, z: 6 }, { x: -18, z: -6 },
+      { x: 0, z: -18 }, { x: 0, z: -21 }, { x: 0, z: -24 },
+      { x: 0, z: 18 },  { x: 0, z: 21 },  { x: 0, z: 24 },
+      { x: 18, z: 0 },  { x: 21, z: 0 },  { x: 24, z: 0 },
+      { x: -18, z: 0 }, { x: -21, z: 0 }, { x: -24, z: 0 },
     ];
   }
 

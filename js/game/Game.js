@@ -411,83 +411,109 @@ class InfernoGame {
   _spawnEnemy() {
     const points = this.level.spawnPoints;
     const living = this.enemies.filter((e) => e.alive);
-
-    // Prefer spawn points 18–30 units from the player. This prevents the
-    // radar from filling with enemies hidden at the far edge of the map and
-    // keeps each wave physically present in the player's playable area.
     const px = this.player.position.x;
     const pz = this.player.position.z;
-    const candidates = points
-      .map((p) => ({ ...p, d2: (p.x - px) ** 2 + (p.z - pz) ** 2 }))
-      .filter((p) => p.d2 > 18 * 18 && p.d2 < 30 * 30)
-      .sort((a, b) => a.d2 - b.d2);
 
-    const fallback = points
-      .map((p) => ({ ...p, d2: (p.x - px) ** 2 + (p.z - pz) ** 2 }))
-      .filter((p) => p.d2 > 16 * 16)
-      .sort((a, b) => a.d2 - b.d2);
-
-    const pool = candidates.length ? candidates : fallback;
-    const weights = this.wave < 2 ? ['VOID_CRAWLER'] : this.wave < 4 ? ['VOID_CRAWLER', 'ASH_HOUND'] : ENEMY_TYPE_KEYS;
-    const typeKey = weights[Math.floor(Math.random() * weights.length)];
+    const typePool =
+      this.wave < 2 ? ['VOID_CRAWLER'] :
+      this.wave < 4 ? ['VOID_CRAWLER', 'ASH_HOUND'] :
+      ENEMY_TYPE_KEYS;
+    const typeKey = typePool[Math.floor(Math.random() * typePool.length)];
     const radius = ENEMY_TYPES[typeKey].radius;
 
-    let pos = null;
-    // Try every suitable point before falling back. This guarantees that we
-    // don't consume a wave spawn just because one candidate was occupied.
-    for (const p of pool) {
-      const angleJitter = Math.random() * Math.PI * 2;
-      const distJitter = 0.35 + Math.random() * 0.65;
-      const test = new THREE.Vector3(p.x + Math.cos(angleJitter) * distJitter, 0, p.z + Math.sin(angleJitter) * distJitter);
-      const safe = { x: test.x, z: test.z };
-      this.level.resolveCollision(safe, radius);
-      const collides = this.level.colliders.some((c) => {
-        const cx = Math.max(c.minX, Math.min(safe.x, c.maxX));
-        const cz = Math.max(c.minZ, Math.min(safe.z, c.maxZ));
-        const dx = safe.x - cx; const dz = safe.z - cz;
-        return dx * dx + dz * dz < radius * radius;
-      });
-      const tooClose = living.some((e) => {
-        const dx = e.mesh.position.x - safe.x;
-        const dz = e.mesh.position.z - safe.z;
-        return e.alive && dx * dx + dz * dz < 3.2 * 3.2;
-      });
-      if (!collides && !tooClose) { pos = new THREE.Vector3(safe.x, 0, safe.z); break; }
-    }
+    const isClear = (x, z, minPlayerDist, minEnemyDist) => {
+      // Never use a point that is inside an AABB collider.
+      for (const c of this.level.colliders) {
+        const cx = Math.max(c.minX, Math.min(x, c.maxX));
+        const cz = Math.max(c.minZ, Math.min(z, c.maxZ));
+        const dx = x - cx;
+        const dz = z - cz;
+        if (dx * dx + dz * dz < (radius + 0.05) ** 2) return false;
+      }
 
-    // Last fallback: deterministic safe position around the player, rather
-    // than silently creating an enemy inside a wall or unreachable corner.
-    if (!pos) {
-      const ring = [20, 22, 24, 26];
-      for (let r = 0; r < ring.length && !pos; r++) {
-        for (let a = 0; a < 16; a++) {
-          const ang = (a / 16) * Math.PI * 2;
-          const safe = { x: px + Math.cos(ang) * ring[r], z: pz + Math.sin(ang) * ring[r] };
-          this.level.resolveCollision(safe, radius);
-          if (isNaN(safe.x) || isNaN(safe.z)) continue;
-          const collides = this.level.colliders.some((c) => {
-            const cx = Math.max(c.minX, Math.min(safe.x, c.maxX));
-            const cz = Math.max(c.minZ, Math.min(safe.z, c.maxZ));
-            const dx = safe.x - cx; const dz = safe.z - cz;
-            return dx * dx + dz * dz < radius * radius;
-          });
-          const tooClose = living.some((e) => {
-            const dx = e.mesh.position.x - safe.x;
-            const dz = e.mesh.position.z - safe.z;
-            return e.alive && dx * dx + dz * dz < 3.2 * 3.2;
-          });
-          if (!collides && !tooClose) { pos = new THREE.Vector3(safe.x, 0, safe.z); break; }
+      const pdx = x - px;
+      const pdz = z - pz;
+      if (pdx * pdx + pdz * pdz < minPlayerDist * minPlayerDist) return false;
+
+      for (const e of living) {
+        const dx = x - e.mesh.position.x;
+        const dz = z - e.mesh.position.z;
+        if (dx * dx + dz * dz < minEnemyDist * minEnemyDist) return false;
+      }
+      return true;
+    };
+
+    // Prefer the points farthest from the player so hostiles don't pop directly
+    // into view, but DO NOT require a narrow distance band. Every point is a
+    // legitimate corridor location and can be reached by A*.
+    const ordered = [...points]
+      .map((p) => ({ ...p, d2: (p.x - px) ** 2 + (p.z - pz) ** 2 }))
+      .sort((a, b) => b.d2 - a.d2);
+
+    let pos = null;
+
+    // Relax constraints progressively. With 12 real corridor points this should
+    // normally succeed in the first pass; the later passes are just a safety net.
+    const passes = [
+      { player: 10, enemy: 3.4 },
+      { player: 7, enemy: 3.0 },
+      { player: 5, enemy: 2.4 },
+      { player: 0, enemy: 2.0 },
+    ];
+
+    for (const pass of passes) {
+      for (const p of ordered) {
+        if (isClear(p.x, p.z, pass.player, pass.enemy)) {
+          pos = new THREE.Vector3(p.x, 0, p.z);
+          break;
         }
       }
+      if (pos) break;
     }
 
-    if (!pos) return false;
+    // The spawn system must never silently lose a required wave slot. If every
+    // point is occupied, reuse the safest existing corridor point rather than
+    // failing the spawn request.
+    if (!pos && ordered.length) {
+      let best = null;
+      let bestScore = -Infinity;
+      for (const p of ordered) {
+        if (!isClear(p.x, p.z, 0, 0)) continue;
+        const playerD2 = (p.x - px) ** 2 + (p.z - pz) ** 2;
+        let nearestEnemy = Infinity;
+        for (const e of living) {
+          nearestEnemy = Math.min(
+            nearestEnemy,
+            Math.hypot(p.x - e.mesh.position.x, p.z - e.mesh.position.z)
+          );
+        }
+        const score = Math.sqrt(playerD2) + (nearestEnemy === Infinity ? 20 : nearestEnemy * 2);
+        if (score > bestScore) {
+          bestScore = score;
+          best = p;
+        }
+      }
+      if (best) pos = new THREE.Vector3(best.x, 0, best.z);
+    }
+
+    if (!pos) {
+      console.warn('[INFERNO] No valid enemy spawn point available.');
+      return false;
+    }
 
     const enemy = new Enemy(typeKey, this.scene, pos);
+    // Activate immediately. The AI has global awareness, so a spawned hostile
+    // begins navigating on the next simulation tick rather than idling unseen.
+    enemy.state = 'walk';
+    enemy._repathT = 0;
+    enemy._path = null;
     this.enemies.push(enemy);
     this.waveSpawned++;
 
-    this.particles.explosion(pos.clone().add(new THREE.Vector3(0, 0.8, 0)), [0.6, 0.2, 0.9]);
+    this.particles.explosion(
+      pos.clone().add(new THREE.Vector3(0, 0.8, 0)),
+      [0.6, 0.2, 0.9]
+    );
     this.audio.enemySpawn();
     return true;
   }

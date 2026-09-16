@@ -28,7 +28,7 @@ or source code from any existing game are used anywhere in this project.
 - WASD movement, sprint, jump, mouse-look via the Pointer Lock API
 - Hitscan combat with muzzle flash, hit particles, and a visible viewmodel
 - Three original weapons: Pulse Rifle, Hellfire Cannon, Void Blaster
-- Three original enemy types with a chase/attack AI state machine:
+- Three original enemy types with a chase/attack AI state machine and grid-based A* navigation:
   Void Crawler, Flesh Warden, Ash Hound
 - Wave-based survival with escalating difficulty
 - Health/armor pickups, ammo pickups, score, kill counter, wave counter
@@ -92,7 +92,7 @@ look, with FIRE / JUMP / RLD buttons.
 │       ├── Player.js           # First-person controller: movement, gravity, vitals
 │       ├── Weapon.js           # Ammo, reload, hitscan firing, viewmodel
 │       ├── Enemy.js            # Original enemy types + low-poly meshes
-│       ├── EnemyAI.js          # Idle → chase → attack state machine
+│       ├── EnemyAI.js          # FSM + A* navigation, collision sliding, unstuck recovery
 │       ├── Level.js            # Facility geometry, lighting, colliders, pickups
 │       ├── Combat.js           # Shot resolution + pickup resolution
 │       ├── HUD.js              # DOM overlay sync
