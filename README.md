@@ -12,6 +12,15 @@ or source code from any existing game are used anywhere in this project.
 
 ---
 
+## 🎮 Game Preview
+
+<p align="center">
+  <img src="images/frontpage.png" width="48%">
+  <img src="images/game.png" width="48%">
+</p>
+
+---
+
 ## Features
 
 **Game Hub website**
