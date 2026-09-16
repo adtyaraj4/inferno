@@ -5,8 +5,8 @@
 import * as THREE from 'three';
 
 const WALL_H = 4.2;
-const WALL_COLOR = 0x1c1a22;
-const FLOOR_COLOR = 0x100e14;
+const WALL_COLOR = 0x2a2731;
+const FLOOR_COLOR = 0x26232c;
 const TRIM_COLOR = 0xff7a30;
 
 export class Level {
@@ -24,15 +24,23 @@ export class Level {
   }
 
   _buildFog() {
-    this.scene.fog = new THREE.FogExp2(0x050408, 0.045);
-    this.scene.background = new THREE.Color(0x050408);
+    this.scene.fog = new THREE.FogExp2(0x14111a, 0.006);
+    this.scene.background = new THREE.Color(0x14111a);
   }
 
   _buildLighting() {
-    const hemi = new THREE.HemisphereLight(0x554455, 0x0a0a0f, 0.55);
+    // Flat, non-distance-based fill so nothing in the level ever reads as
+    // pure black, regardless of how far it sits from a point light.
+    const ambient = new THREE.AmbientLight(0x887d94, 2.15);
+    this.scene.add(ambient);
+
+    const hemi = new THREE.HemisphereLight(0xa493ad, 0x332b39, 1.65);
     this.scene.add(hemi);
 
-    const key = new THREE.PointLight(0xff7a30, 1.6, 30, 2);
+    // decay: 0 means no physically-based distance falloff, so the light
+    // stays readable across an entire room/corridor instead of vanishing
+    // a few meters out.
+    const key = new THREE.PointLight(0xff8a4c, 4.0, 52, 0);
     key.position.set(0, 3.4, 0);
     this.scene.add(key);
     this.flickerLight = key;
@@ -70,7 +78,7 @@ export class Level {
 
   _ceilingPatch(x, z, w, d) {
     const geo = new THREE.PlaneGeometry(w, d);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x08070a, roughness: 1 });
+    const mat = new THREE.MeshStandardMaterial({ color: 0x15121a, roughness: 1 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.rotation.x = Math.PI / 2;
     mesh.position.set(x, WALL_H, z);
@@ -80,7 +88,7 @@ export class Level {
   _pillar(x, z) {
     this._addBox({ w: 1, h: WALL_H, d: 1, x, y: WALL_H / 2, z, color: 0x14121a });
     this._addCollider(x, z, 1, 1);
-    const light = new THREE.PointLight(0x9c1f2e, 0.8, 6, 2);
+    const light = new THREE.PointLight(0xb52d3f, 2.0, 12, 0);
     light.position.set(x, 2.6, z);
     this.group.add(light);
   }
@@ -93,6 +101,80 @@ export class Level {
     mesh.position.set(x, 1.0, z);
     this.group.add(mesh);
     this.pickupPoints.push({ x, z, kind, mesh, active: true, respawnAt: 0 });
+  }
+
+  /* --------------------------------------------------- environmental props */
+
+  _crate(x, z, rotY = 0) {
+    const mat = new THREE.MeshStandardMaterial({ color: 0x3a2f22, roughness: 0.95 });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), mat);
+    mesh.position.set(x, 0.45, z);
+    mesh.rotation.y = rotY;
+    this.group.add(mesh);
+    this._addCollider(x, z, 0.85, 0.85);
+  }
+
+  _barrel(x, z) {
+    const mat = new THREE.MeshStandardMaterial({ color: 0x2a1418, roughness: 0.6, metalness: 0.5 });
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.95, 10), mat);
+    mesh.position.set(x, 0.475, z);
+    this.group.add(mesh);
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.03, 6, 12), new THREE.MeshStandardMaterial({ color: 0xff7a30, emissive: 0xff7a30, emissiveIntensity: 0.4 }));
+    band.rotation.x = Math.PI / 2;
+    band.position.set(x, 0.7, z);
+    this.group.add(band);
+    this._addCollider(x, z, 0.65, 0.65);
+  }
+
+  /** A broken/sparking console — pure geometry, no external texture. */
+  _terminal(x, z, rotY = 0) {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.1, 0.5), new THREE.MeshStandardMaterial({ color: 0x1a1820, roughness: 0.7, metalness: 0.3 }));
+    base.position.set(x, 0.55, z);
+    base.rotation.y = rotY;
+    this.group.add(base);
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.32), new THREE.MeshBasicMaterial({ color: 0x2fbcff }));
+    screen.position.set(x + Math.sin(rotY) * 0.26, 0.85, z + Math.cos(rotY) * 0.26);
+    screen.rotation.y = rotY;
+    this.group.add(screen);
+    this._flickerScreens = this._flickerScreens || [];
+    this._flickerScreens.push(screen.material);
+    this._addCollider(x, z, 0.7, 0.5);
+  }
+
+  /** Canvas-texture warning placard mounted flush on a wall. */
+  _warningSign(x, y, z, rotY, label = 'HAZARD') {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#151016'; ctx.fillRect(0, 0, 256, 128);
+    ctx.strokeStyle = '#ff7a30'; ctx.lineWidth = 8; ctx.strokeRect(6, 6, 244, 116);
+    ctx.fillStyle = '#ff7a30';
+    ctx.font = 'bold 30px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('\u26A0', 128, 46);
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText(label, 128, 92);
+    const texture = new THREE.CanvasTexture(canvas);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.45), new THREE.MeshBasicMaterial({ map: texture, transparent: true }));
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = rotY;
+    this.group.add(mesh);
+  }
+
+  /** A wall-mounted strip that pulses like an emergency alarm light. */
+  _emergencyStrip(x, y, z, rotY) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.08, 0.08),
+      new THREE.MeshStandardMaterial({ color: 0xff2233, emissive: 0xff2233, emissiveIntensity: 1 })
+    );
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = rotY;
+    this.group.add(mesh);
+    const light = new THREE.PointLight(0xff2233, 0, 8, 0);
+    light.position.set(x, y, z);
+    this.group.add(light);
+    this.emergencyLights = this.emergencyLights || [];
+    this.emergencyLights.push({ mesh, light, phase: Math.random() * 10, active: false, nextToggle: Math.random() * 3 });
   }
 
   _buildLayout() {
@@ -115,6 +197,21 @@ export class Level {
     this._pillar(4, -4);
     this._pillar(-4, 4);
     this._pillar(4, 4);
+
+    // Environmental storytelling: crates, barrels, a broken terminal, signage
+    this._crate(-9, -3, 0.3);
+    this._crate(-9.6, -2.2, 0.9);
+    this._barrel(9, 3);
+    this._barrel(9.8, 2.4);
+    this._terminal(-1.5, -14.9, 0);
+    this._terminal(11, -1.5, -Math.PI / 2);
+    this._warningSign(0, 2.4, -15.4, 0, 'CONTAINMENT');
+    this._warningSign(-15.4, 2.4, 0, Math.PI / 2, 'RESTRICTED');
+    this._warningSign(15.4, 2.4, 0, -Math.PI / 2, 'BIOHAZARD');
+    this._emergencyStrip(-8, 3.9, -15.3, 0);
+    this._emergencyStrip(8, 3.9, -15.3, 0);
+    this._emergencyStrip(-8, 3.9, 15.3, 0);
+    this._emergencyStrip(8, 3.9, 15.3, 0);
 
     // Four corridors leading to rooms
     this._buildCorridorRoom(0, -1, 'north');
@@ -171,9 +268,21 @@ export class Level {
     this._roomWallsWithGap(rx, rz, half, dirX, dirZ, corridorW);
 
     // an accent light in each room, distinct per direction for orientation
-    const roomLight = new THREE.PointLight(0xff7a30, 1.1, 14, 2);
+    const roomLight = new THREE.PointLight(0xff8a4c, 3.4, 28, 0);
     roomLight.position.set(rx, 3, rz);
     this.group.add(roomLight);
+
+    // a second light halfway down the corridor so it never goes fully dark
+    const corridorLight = new THREE.PointLight(0x9f83b5, 2.6, 24, 0);
+    corridorLight.position.set(dirX * (15.5 + corridorLen / 2), 3, dirZ * (15.5 + corridorLen / 2));
+    this.group.add(corridorLight);
+
+    // scatter a prop or two inside each room so every destination feels distinct
+    const propOffsetX = rx + (dirZ !== 0 ? (Math.random() > 0.5 ? 3 : -3) : (dirX > 0 ? -4 : 4));
+    const propOffsetZ = rz + (dirX !== 0 ? (Math.random() > 0.5 ? 3 : -3) : (dirZ > 0 ? -4 : 4));
+    if (Math.random() > 0.5) this._crate(propOffsetX, propOffsetZ, Math.random() * Math.PI);
+    else this._barrel(propOffsetX, propOffsetZ);
+    this._emergencyStrip(rx, WALL_H - 0.3, rz - roomSize / 2 + 0.15, 0);
   }
 
   _roomWallsWithGap(cx, cz, half, dirX, dirZ, gapWidth) {
@@ -184,7 +293,9 @@ export class Level {
       { x: cx - half, z: cz, w: 0.6, d: half * 2, facing: 'w' },
       { x: cx + half, z: cz, w: 0.6, d: half * 2, facing: 'e' },
     ];
-    const facingToSkip = dirZ === -1 ? 'n' : dirZ === 1 ? 's' : dirX === 1 ? 'e' : 'w';
+    // The doorway is on the side facing the corridor/hall.
+    // North -> south wall, South -> north wall, East -> west wall, West -> east wall.
+    const facingToSkip = dirZ === -1 ? 's' : dirZ === 1 ? 'n' : dirX === 1 ? 'w' : 'e';
 
     for (const seg of segs) {
       if (seg.facing === facingToSkip) {
@@ -231,7 +342,7 @@ export class Level {
   update(dt, elapsed) {
     this._flickerT += dt;
     if (this.flickerLight) {
-      this.flickerLight.intensity = 1.5 + Math.sin(elapsed * 7) * 0.08 + (Math.random() < 0.02 ? -0.6 : 0);
+      this.flickerLight.intensity = 4.0 + Math.sin(elapsed * 7) * 0.16 + (Math.random() < 0.015 ? -0.55 : 0);
     }
     for (const p of this.pickupPoints) {
       if (p.active) {
@@ -241,6 +352,24 @@ export class Level {
         p.active = true;
         p.mesh.visible = true;
       }
+    }
+
+    // Emergency strips pulse independently, like a facility alarm cycling
+    // through zones rather than a single synchronized strobe.
+    for (const e of this.emergencyLights || []) {
+      e.nextToggle -= dt;
+      if (e.nextToggle <= 0) {
+        e.active = !e.active;
+        e.nextToggle = e.active ? 0.12 + Math.random() * 0.1 : 1.5 + Math.random() * 3;
+      }
+      const targetIntensity = e.active ? 2.4 : 0;
+      e.light.intensity += (targetIntensity - e.light.intensity) * Math.min(1, dt * 20);
+      e.mesh.material.emissiveIntensity = e.active ? 1.6 : 0.2;
+    }
+
+    // Broken terminal screens flicker like failing CRTs.
+    for (const mat of this._flickerScreens || []) {
+      if (Math.random() < 0.04) mat.color.setHex(Math.random() < 0.5 ? 0x0a1a22 : 0x2fbcff);
     }
   }
 

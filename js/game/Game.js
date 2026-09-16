@@ -1,5 +1,9 @@
 // Game.js — orchestrates the Three.js scene, input, waves, HUD, and menus.
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { Level } from './Level.js';
 import { Player } from './Player.js';
 import { Weapon } from './Weapon.js';
@@ -13,6 +17,42 @@ import { submitScore } from '../leaderboard.js';
 
 const MAX_DT = 1 / 20; // clamp huge frame gaps (tab switches, slow devices)
 const ENEMY_TYPE_KEYS = Object.keys(ENEMY_TYPES);
+
+// A compact fragment shader: vignette + faint scanlines + a whisper of
+// chromatic aberration, all in one pass so post-processing stays cheap.
+const GrimShader = {
+  uniforms: { tDiffuse: { value: null }, time: { value: 0 }, vignetteStrength: { value: 0.18 } },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float time;
+    uniform float vignetteStrength;
+    varying vec2 vUv;
+    void main() {
+      vec2 uv = vUv;
+      vec2 fromCenter = uv - 0.5;
+      float aberration = 0.0022;
+      float r = texture2D(tDiffuse, uv - fromCenter * aberration).r;
+      float g = texture2D(tDiffuse, uv).g;
+      float b = texture2D(tDiffuse, uv + fromCenter * aberration).b;
+      vec3 color = vec3(r, g, b);
+
+      float vig = smoothstep(0.42, 0.78, length(fromCenter));
+      color *= mix(1.0 - vignetteStrength, 1.0, vig);
+
+      float scan = sin(uv.y * 800.0 + time * 4.0) * 0.006;
+      color -= scan;
+
+      float grain = fract(sin(dot(uv * max(time, 0.01), vec2(12.9898, 78.233))) * 43758.5453) * 0.012;
+      color += grain - 0.006;
+
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `,
+};
 
 class InfernoGame {
   constructor() {
@@ -42,8 +82,12 @@ class InfernoGame {
     this.spawnTimer = 0;
     this.waveActive = false;
 
+    this.shakeMagnitude = 0;
+    this._frameMouseDelta = { x: 0, y: 0 };
+
     this._initRenderer();
     this._initScene();
+    this._initPostProcessing();
     this._initInput();
     this._bindMenus();
     this._runLoadingSequence();
@@ -55,9 +99,14 @@ class InfernoGame {
 
   _initRenderer() {
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // Post-processing roughly doubles fill cost, so cap DPR a little tighter
+    // than the marketing page does to keep frame time predictable.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = false; // perf: fake shading via emissive/point lights instead
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.35;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 120);
@@ -69,12 +118,35 @@ class InfernoGame {
     this.particles = new ParticleSystem(this.scene);
     this.weapon = new Weapon(this.camera, this.particles, this.audio, 'pulse');
     this.hud = new HUD();
+
+    // A camera-mounted fill light so whatever the player is looking at —
+    // including approaching enemies in unlit corridors — stays visible.
+    this.headlamp = new THREE.PointLight(0xfff4e5, 4.6, 28, 0);
+    this.headlamp.position.set(0, 0, 0.4);
+    this.camera.add(this.headlamp);
+    this.scene.add(this.camera);
+  }
+
+  _initPostProcessing() {
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+
+    // Bloom is tuned to a high threshold so it only catches genuinely bright
+    // emissive surfaces (fire trim, cores, muzzle flashes) rather than
+    // blowing out every mid-tone in the scene.
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.30, 0.32, 0.90);
+    this.composer.addPass(this.bloomPass);
+
+    this.grimPass = new ShaderPass(GrimShader);
+    this.composer.addPass(this.grimPass);
   }
 
   _onResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.composer?.setSize(window.innerWidth, window.innerHeight);
+    this.bloomPass?.setSize(window.innerWidth, window.innerHeight);
   }
 
   _runLoadingSequence() {
@@ -119,6 +191,8 @@ class InfernoGame {
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement === this.canvas && this.state === 'playing') {
         this.player.applyLook(e.movementX, e.movementY);
+        this._frameMouseDelta.x += e.movementX;
+        this._frameMouseDelta.y += e.movementY;
       }
     });
 
@@ -190,7 +264,11 @@ class InfernoGame {
           const dy = t.clientY - this.touch.look.y;
           this.touch.look.x = t.clientX;
           this.touch.look.y = t.clientY;
-          if (this.state === 'playing') this.player.applyLook(dx * 2.2, dy * 2.2);
+          if (this.state === 'playing') {
+            this.player.applyLook(dx * 2.2, dy * 2.2);
+            this._frameMouseDelta.x += dx * 2.2;
+            this._frameMouseDelta.y += dy * 2.2;
+          }
         }
       }
       this._syncMoveInput();
@@ -278,7 +356,9 @@ class InfernoGame {
 
     this.state = 'playing';
     this.hud.show();
+    this.hud.setObjective('Eliminate all hostiles');
     this._nextWave();
+    this.audio.startAmbience();
 
     if (!('ontouchstart' in window)) this.canvas.requestPointerLock();
     this.clock.getDelta(); // discard time spent in menu
@@ -306,6 +386,7 @@ class InfernoGame {
     this.state = 'dead';
     document.exitPointerLock?.();
     this.audio.death();
+    this.audio.stopAmbience();
     this.dom.deathStats.textContent = `Score: ${Math.round(this.score).toLocaleString()} · Kills: ${this.kills} · Wave: ${this.wave}`;
     this.dom.deathOverlay.hidden = false;
     this.hud.hide();
@@ -320,6 +401,7 @@ class InfernoGame {
     this.spawnTimer = 0;
     this.audio.waveStart();
     this.hud.showWaveBanner(`WAVE ${this.wave}`);
+    this.hud.setObjective(`Survive wave ${this.wave} — ${this.enemiesRemainingToSpawn} hostiles inbound`);
   }
 
   _spawnEnemy() {
@@ -330,15 +412,24 @@ class InfernoGame {
     const pos = new THREE.Vector3(spawn.x + (Math.random() - 0.5) * 2, 0, spawn.z + (Math.random() - 0.5) * 2);
     const enemy = new Enemy(typeKey, this.scene, pos);
     this.enemies.push(enemy);
+
+    // Spawn feedback: a burst of particles + a distinct rising tone so an
+    // incoming mob is obvious even before it's on screen.
+    this.particles.explosion(pos.clone().add(new THREE.Vector3(0, 0.8, 0)), [0.6, 0.2, 0.9]);
+    this.audio.enemySpawn();
+  }
+
+  addShake(amount) {
+    this.shakeMagnitude = Math.min(0.35, Math.max(this.shakeMagnitude, amount));
   }
 
   /* ------------------------------------------------------------------- loop */
 
   start() {
-    this.renderer.setAnimationLoop(() => this._tick());
+    this.renderer.setAnimationLoop((t) => this._tick(t));
   }
 
-  _tick() {
+  _tick(timeMs) {
     const dt = Math.min(this.clock.getDelta(), MAX_DT);
     const elapsed = this.clock.elapsedTime;
 
@@ -349,27 +440,51 @@ class InfernoGame {
       this._updateGameplay(dt, elapsed);
     }
 
-    for (const e of this.enemies) e.update(dt);
+    // Dead enemies keep animating their collapse regardless of pause state
+    // so a death mid-pause doesn't freeze awkwardly; living enemies are
+    // driven entirely through updateEnemyAI while playing (see above).
+    for (const e of this.enemies) {
+      if (!e.alive) e.update(dt);
+    }
     this.enemies = this.enemies.filter((e) => e.alive || e.deathT < 0.7);
 
     this.hud.tick(dt);
-    this.renderer.render(this.scene, this.camera);
+
+    if (this.grimPass) this.grimPass.uniforms.time.value = elapsed;
+    if (this.composer) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
   }
 
   _updateGameplay(dt, elapsed) {
     this.player.update(dt);
     if (!this.player.alive) { this._die(); return; }
 
+    // screen shake: apply a decaying random jitter on top of the player's
+    // "clean" camera transform that update() just set
+    if (this.shakeMagnitude > 0.0005) {
+      this.camera.position.x += (Math.random() - 0.5) * this.shakeMagnitude;
+      this.camera.position.y += (Math.random() - 0.5) * this.shakeMagnitude;
+      this.shakeMagnitude *= Math.max(0, 1 - dt * 8);
+    } else {
+      this.shakeMagnitude = 0;
+    }
+
     const moving = Math.abs(this.player.input.forward) + Math.abs(this.player.input.right) > 0;
-    this.weapon.update(dt, moving);
+    this.weapon.update(dt, moving, this.player, this._frameMouseDelta);
+    this._frameMouseDelta.x = 0;
+    this._frameMouseDelta.y = 0;
 
     const wantsFire = this.mouseDown || this.touch.firing;
     if (wantsFire) {
-      const shot = this.weapon.tryFire();
-      const result = resolveShot(shot, this.enemies, this.particles, this.audio);
-      if (result?.killed) {
-        this.kills++;
-        this.score += result.enemy.type.scoreValue;
+      const shot = this.weapon.tryFire(this.player);
+      if (shot && this.weapon.def.kind === 'hellfire') this.addShake(0.06);
+      const result = resolveShot(shot, this.enemies, this.level, this.particles, this.audio);
+      if (result?.enemy) {
+        this.hud.flashHitMarker(result.headshot);
+        if (result.killed) {
+          this.kills++;
+          this.score += result.enemy.type.scoreValue + (result.headshot ? 40 : 0);
+        }
       }
     }
 
@@ -379,8 +494,9 @@ class InfernoGame {
         const alive = this.player.takeDamage(dmg);
         this.hud.flashDamage();
         this.audio.playerHurt();
+        this.addShake(0.12);
         if (!alive) this._die();
-      });
+      }, this.audio);
     }
 
     // pickups
@@ -400,11 +516,13 @@ class InfernoGame {
         }
       } else if (this.enemies.every((e) => !e.alive)) {
         this.waveActive = false;
+        this.hud.setObjective('Area clear — regrouping…');
         setTimeout(() => { if (this.state === 'playing') this._nextWave(); }, 2400);
       }
     }
 
     this.hud.update({ score: this.score, kills: this.kills, wave: this.wave, player: this.player, weapon: this.weapon });
+    this.hud.updateRadar(this.enemies, this.player);
   }
 }
 

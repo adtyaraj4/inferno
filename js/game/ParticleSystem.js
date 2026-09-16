@@ -114,6 +114,51 @@ export class ParticleSystem {
     }
   }
 
+  /** A single ejected shell casing arc — cheap, reuses the same point pool. */
+  shellCasing(position, sideDir) {
+    this._spawn(position.x, position.y, position.z, {
+      vx: sideDir.x * 2.2 + (Math.random() - 0.5) * 0.6,
+      vy: 1.6 + Math.random() * 0.8,
+      vz: sideDir.z * 2.2 + (Math.random() - 0.5) * 0.6,
+      life: 0.5 + Math.random() * 0.2,
+      color: [0.85, 0.7, 0.3],
+      gravity: 9,
+      size: 0.6,
+    });
+  }
+
+  /** Sparks for a hitscan shot striking a wall/floor instead of an enemy. */
+  wallSparks(position, normal = new THREE.Vector3(0, 1, 0)) {
+    for (let i = 0; i < 10; i++) {
+      const spread = 1.6;
+      this._spawn(position.x, position.y, position.z, {
+        vx: normal.x * 2 + (Math.random() - 0.5) * spread,
+        vy: normal.y * 2 + (Math.random() - 0.5) * spread + 0.5,
+        vz: normal.z * 2 + (Math.random() - 0.5) * spread,
+        life: 0.2 + Math.random() * 0.2,
+        color: [1, 0.8, 0.4],
+        gravity: 6,
+      });
+    }
+  }
+
+  /** Stylized blood-abstract mist on a hit reaction — kept non-graphic (muted red mist, not gore). */
+  bloodMist(position) {
+    for (let i = 0; i < 10; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const speed = 0.6 + Math.random() * 1.2;
+      this._spawn(position.x, position.y, position.z, {
+        vx: Math.cos(theta) * speed,
+        vy: 0.6 + Math.random() * 0.8,
+        vz: Math.sin(theta) * speed,
+        life: 0.4 + Math.random() * 0.3,
+        color: [0.55, 0.08, 0.1],
+        gravity: 5,
+        size: 0.8,
+      });
+    }
+  }
+
   update(dt) {
     for (let i = 0; i < MAX_PARTICLES; i++) {
       const p = this.pool[i];

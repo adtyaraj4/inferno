@@ -42,6 +42,7 @@
   .hero-actions { flex-direction: column; width: 100%; }
   .hero-actions .btn { width: 100%; }
   .footer-inner { align-items: flex-start; }
+  .hero-wordmark { opacity: 0.6; }
 }
 
 @media (max-width: 400px) {

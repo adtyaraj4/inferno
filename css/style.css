@@ -20,6 +20,7 @@
   /* Type */
   --f-display: 'Chakra Petch', 'Rajdhani', sans-serif;
   --f-body: 'Rajdhani', 'Chakra Petch', sans-serif;
+  --f-impact: 'Anton', 'Chakra Petch', sans-serif;
 
   /* Layout */
   --nav-h: 76px;
@@ -221,6 +222,26 @@ ul { list-style: none; margin: 0; padding: 0; }
   position: absolute; inset: 0; opacity: 0.05; mix-blend-mode: overlay;
   background: repeating-linear-gradient(to bottom, #fff 0px, #fff 1px, transparent 1px, transparent 3px);
 }
+.hero-wordmark {
+  position: absolute; inset: 0; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  overflow: hidden; pointer-events: none;
+  font-family: var(--f-impact);
+  text-transform: uppercase;
+  line-height: 0.82;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.hero-wordmark span {
+  font-size: clamp(6rem, 19vw, 15rem);
+  background: linear-gradient(180deg, rgba(217,43,60,0.5), rgba(255,122,48,0.14) 70%, transparent 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: blur(0.3px);
+}
+.hero-wordmark span:last-child {
+  background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0.03) 70%, transparent 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
 .hero-content { position: relative; z-index: 2; max-width: 780px; }
 .eyebrow-status {
   font-family: var(--f-display);
@@ -272,39 +293,6 @@ ul { list-style: none; margin: 0; padding: 0; }
   animation: scrollDown 1.8s infinite;
 }
 @keyframes scrollDown { 0% { opacity: 0; transform: translateY(0); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(14px); } }
-
-/* ---------- Modal / trailer ---------- */
-.modal { position: fixed; inset: 0; z-index: 500; display: flex; align-items: center; justify-content: center; padding: 24px; }
-.modal[hidden] { display: none; }
-.modal-backdrop { position: absolute; inset: 0; background: rgba(5,4,6,0.85); backdrop-filter: blur(6px); }
-.modal-panel {
-  position: relative; z-index: 1; max-width: 720px; width: 100%;
-  background: var(--c-charcoal); border: 1px solid var(--c-line);
-  border-radius: var(--radius-card); padding: 32px;
-  animation: modalIn 0.3s var(--ease);
-}
-@keyframes modalIn { from { opacity: 0; transform: translateY(16px) scale(0.98); } to { opacity: 1; transform: none; } }
-.modal-close {
-  position: absolute; top: 16px; right: 16px; width: 36px; height: 36px;
-  border-radius: 50%; border: 1px solid var(--c-line); background: rgba(255,255,255,0.04);
-  color: #fff; font-size: 1.3rem; line-height: 1;
-}
-.trailer-caption { font-family: var(--f-display); color: var(--c-fire-soft); letter-spacing: 0.15em; font-size: 0.8rem; margin-bottom: 16px; }
-.trailer-visual {
-  aspect-ratio: 16/9; border-radius: 12px; overflow: hidden; position: relative;
-  background: radial-gradient(circle at 50% 40%, var(--c-ember), var(--c-void));
-  border: 1px solid var(--c-line);
-}
-.trailer-particles { position: absolute; inset: 0; }
-.trailer-particles::before, .trailer-particles::after {
-  content: ''; position: absolute; width: 3px; height: 3px; border-radius: 50%;
-  background: var(--c-fire); box-shadow: 0 0 12px 3px var(--c-fire);
-  animation: emberFloat 4s linear infinite;
-}
-.trailer-particles::after { left: 60%; animation-duration: 6s; animation-delay: 1.5s; }
-.trailer-particles::before { left: 30%; top: 80%; }
-@keyframes emberFloat { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-220px); opacity: 0; } }
-.trailer-note { margin-top: 16px; font-style: italic; color: var(--c-text-dim); }
 
 /* ---------- Section shared ---------- */
 main > section { padding: 120px 24px; max-width: var(--container); margin: 0 auto; position: relative; }

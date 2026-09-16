@@ -94,7 +94,18 @@
       <span></span><span></span><span></span><span></span>
     </div>
 
+    <div class="hud-hitmarker" id="hitMarker" aria-hidden="true">
+      <span></span><span></span><span></span><span></span>
+    </div>
+
+    <div class="hud-objective" id="hudObjective">Eliminate all hostiles</div>
+
     <div class="hud-wave-banner" id="waveBanner" aria-hidden="true"></div>
+
+    <div class="hud-radar" id="hudRadar" aria-hidden="true">
+      <div class="radar-ring"></div>
+      <div class="radar-player"></div>
+    </div>
 
     <div class="hud-bottom">
       <div class="hud-vitals">
@@ -137,10 +148,12 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
   }
 }
 </script>
 <script type="module" src="../js/game/Game.js"></script>
+
 </body>
 </html>

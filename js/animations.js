@@ -101,29 +101,3 @@ export function initHeroParticles() {
   });
 }
 
-export function initTrailerModal() {
-  const modal = document.getElementById('trailerModal');
-  const openBtn = document.getElementById('watchTrailerBtn');
-  if (!modal || !openBtn) return;
-
-  const closeEls = modal.querySelectorAll('[data-close-modal]');
-  let lastFocused = null;
-
-  function open() {
-    lastFocused = document.activeElement;
-    modal.hidden = false;
-    document.body.style.overflow = 'hidden';
-    modal.querySelector('.modal-close')?.focus();
-  }
-  function close() {
-    modal.hidden = true;
-    document.body.style.overflow = '';
-    lastFocused?.focus();
-  }
-
-  openBtn.addEventListener('click', open);
-  closeEls.forEach((el) => el.addEventListener('click', close));
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !modal.hidden) close();
-  });
-}

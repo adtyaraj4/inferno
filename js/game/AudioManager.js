@@ -9,6 +9,7 @@ export class AudioManager {
     this.ctx = null;
     this.enabled = isSoundEnabled();
     this.master = null;
+    this.ambientNodes = null;
   }
 
   _ensureContext() {
@@ -27,7 +28,10 @@ export class AudioManager {
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
   }
 
-  setEnabled(enabled) { this.enabled = enabled; }
+  setEnabled(enabled) {
+    this.enabled = enabled;
+    if (this.ambientNodes) this.ambientNodes.gain.gain.value = enabled ? this.ambientNodes.targetGain : 0;
+  }
 
   _tone({ freq = 440, duration = 0.12, type = 'square', gain = 0.5, freqEnd = null, delay = 0 }) {
     if (!this.enabled) return;
@@ -46,7 +50,7 @@ export class AudioManager {
     osc.stop(t0 + duration + 0.02);
   }
 
-  _noise({ duration = 0.15, gain = 0.4, delay = 0 }) {
+  _noise({ duration = 0.15, gain = 0.4, delay = 0, filterFreq = null }) {
     if (!this.enabled) return;
     this._ensureContext();
     if (!this.ctx) return;
@@ -60,7 +64,15 @@ export class AudioManager {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(gain, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-    src.connect(g).connect(this.master);
+    let node = src;
+    if (filterFreq) {
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = filterFreq;
+      node.connect(filter);
+      node = filter;
+    }
+    node.connect(g).connect(this.master);
     src.start(t0);
   }
 
@@ -77,11 +89,79 @@ export class AudioManager {
 
   reload() { this._tone({ freq: 300, duration: 0.08, type: 'triangle', gain: 0.25, delay: 0 }); this._tone({ freq: 420, duration: 0.1, type: 'triangle', gain: 0.25, delay: 0.15 }); }
   hitEnemy() { this._tone({ freq: 900, freqEnd: 500, duration: 0.08, type: 'triangle', gain: 0.3 }); }
+  headshot() { this._tone({ freq: 1400, freqEnd: 700, duration: 0.1, type: 'triangle', gain: 0.4 }); }
   enemyDeath() { this._noise({ duration: 0.25, gain: 0.4 }); this._tone({ freq: 150, freqEnd: 40, duration: 0.3, type: 'sawtooth', gain: 0.3 }); }
   playerHurt() { this._tone({ freq: 140, freqEnd: 60, duration: 0.2, type: 'sawtooth', gain: 0.45 }); }
   pickup() { this._tone({ freq: 500, freqEnd: 900, duration: 0.15, type: 'sine', gain: 0.3 }); }
   jump() { this._tone({ freq: 300, freqEnd: 500, duration: 0.1, type: 'sine', gain: 0.2 }); }
   waveStart() { this._tone({ freq: 200, duration: 0.4, type: 'sawtooth', gain: 0.3, delay: 0 }); this._tone({ freq: 260, duration: 0.4, type: 'sawtooth', gain: 0.3, delay: 0.15 }); }
+  enemySpawn() { this._tone({ freq: 90, freqEnd: 220, duration: 0.3, type: 'sine', gain: 0.28 }); this._noise({ duration: 0.12, gain: 0.15 }); }
   death() { this._tone({ freq: 220, freqEnd: 40, duration: 0.9, type: 'sawtooth', gain: 0.5 }); }
   menuClick() { this._tone({ freq: 520, duration: 0.06, type: 'triangle', gain: 0.2 }); }
+  wallImpact() { this._noise({ duration: 0.08, gain: 0.2, filterFreq: 1800 }); }
+  shellTink() { this._tone({ freq: 1800 + Math.random() * 600, duration: 0.05, type: 'triangle', gain: 0.06 }); }
+
+  /** A low, irregular growl — pitch/duration vary so a room full of enemies doesn't sound robotic. */
+  growl(distanceFactor = 1) {
+    const base = 55 + Math.random() * 30;
+    this._tone({ freq: base, freqEnd: base * 0.6, duration: 0.5 + Math.random() * 0.4, type: 'sawtooth', gain: 0.22 * distanceFactor });
+    this._noise({ duration: 0.3, gain: 0.08 * distanceFactor, filterFreq: 400 });
+  }
+
+  footstep(kind = 'player') {
+    const freq = kind === 'player' ? 140 : 90;
+    this._noise({ duration: 0.07, gain: kind === 'player' ? 0.12 : 0.16, filterFreq: freq });
+  }
+
+  /** A quiet, looping drone + occasional metallic clank, for facility ambience. */
+  startAmbience() {
+    this._ensureContext();
+    if (!this.ctx || this.ambientNodes) return;
+
+    const gain = this.ctx.createGain();
+    gain.gain.value = this.enabled ? 0.05 : 0;
+    gain.connect(this.master);
+
+    const osc1 = this.ctx.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.value = 42;
+    const osc2 = this.ctx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = 63;
+    const lfo = this.ctx.createOscillator();
+    lfo.frequency.value = 0.07;
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.value = 0.02;
+    lfo.connect(lfoGain).connect(gain.gain);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    osc1.start();
+    osc2.start();
+    lfo.start();
+
+    this.ambientNodes = { gain, osc1, osc2, lfo, targetGain: 0.05 };
+
+    this._scheduleClank();
+  }
+
+  _scheduleClank() {
+    if (!this.ambientNodes) return;
+    const delay = 8 + Math.random() * 14;
+    setTimeout(() => {
+      if (!this.ambientNodes) return;
+      this._noise({ duration: 0.4, gain: 0.06, filterFreq: 500 });
+      this._scheduleClank();
+    }, delay * 1000);
+  }
+
+  stopAmbience() {
+    if (!this.ambientNodes) return;
+    try {
+      this.ambientNodes.osc1.stop();
+      this.ambientNodes.osc2.stop();
+      this.ambientNodes.lfo.stop();
+    } catch (err) { /* already stopped */ }
+    this.ambientNodes = null;
+  }
 }
