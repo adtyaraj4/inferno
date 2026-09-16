@@ -79,6 +79,8 @@ class InfernoGame {
     this.wave = 0;
     this.enemies = [];
     this.enemiesRemainingToSpawn = 0;
+    this.waveTotal = 0;
+    this.waveSpawned = 0;
     this.spawnTimer = 0;
     this.waveActive = false;
 
@@ -397,7 +399,9 @@ class InfernoGame {
   _nextWave() {
     this.wave++;
     this.waveActive = true;
-    this.enemiesRemainingToSpawn = 3 + this.wave * 2;
+    this.waveTotal = 3 + this.wave * 2;
+    this.waveSpawned = 0;
+    this.enemiesRemainingToSpawn = this.waveTotal;
     this.spawnTimer = 0;
     this.audio.waveStart();
     this.hud.showWaveBanner(`WAVE ${this.wave}`);
@@ -406,15 +410,38 @@ class InfernoGame {
 
   _spawnEnemy() {
     const points = this.level.spawnPoints;
-    const spawn = points[Math.floor(Math.random() * points.length)];
+    const living = this.enemies.filter((e) => e.alive);
+    const candidates = points
+      .map((p) => ({ ...p, d2: (p.x - this.player.position.x) ** 2 + (p.z - this.player.position.z) ** 2 }))
+      .filter((p) => p.d2 > 14 * 14)
+      .sort(() => Math.random() - 0.5);
+
+    const chosen = candidates[0] || points[0];
     const weights = this.wave < 2 ? ['VOID_CRAWLER'] : this.wave < 4 ? ['VOID_CRAWLER', 'ASH_HOUND'] : ENEMY_TYPE_KEYS;
     const typeKey = weights[Math.floor(Math.random() * weights.length)];
-    const pos = new THREE.Vector3(spawn.x + (Math.random() - 0.5) * 2, 0, spawn.z + (Math.random() - 0.5) * 2);
+    const radius = ENEMY_TYPES[typeKey].radius;
+
+    let pos = null;
+    for (let i = 0; i < Math.min(candidates.length, 8); i++) {
+      const p = candidates[i];
+      const test = new THREE.Vector3(p.x + (Math.random() - 0.5) * 1.2, 0, p.z + (Math.random() - 0.5) * 1.2);
+      const safe = { x: test.x, z: test.z };
+      this.level.resolveCollision(safe, radius);
+      const collides = this.level.colliders.some((c) => {
+        const cx = Math.max(c.minX, Math.min(safe.x, c.maxX));
+        const cz = Math.max(c.minZ, Math.min(safe.z, c.maxZ));
+        const dx = safe.x - cx; const dz = safe.z - cz;
+        return dx * dx + dz * dz < radius * radius;
+      });
+      const tooClose = living.some((e) => e.alive && e.mesh.position.distanceToSquared(new THREE.Vector3(safe.x, 0, safe.z)) < 2.5 * 2.5);
+      if (!collides && !tooClose) { pos = new THREE.Vector3(safe.x, 0, safe.z); break; }
+    }
+    if (!pos) pos = new THREE.Vector3(chosen.x, 0, chosen.z);
+
     const enemy = new Enemy(typeKey, this.scene, pos);
     this.enemies.push(enemy);
+    this.waveSpawned++;
 
-    // Spawn feedback: a burst of particles + a distinct rising tone so an
-    // incoming mob is obvious even before it's on screen.
     this.particles.explosion(pos.clone().add(new THREE.Vector3(0, 0.8, 0)), [0.6, 0.2, 0.9]);
     this.audio.enemySpawn();
   }
@@ -505,7 +532,7 @@ class InfernoGame {
       if (p.kind === 'ammo') this.weapon.reserve = Math.min(this.weapon.def.reserveMax, this.weapon.reserve + Math.round(this.weapon.def.magSize * 1.5));
     }
 
-    // wave spawning
+    // wave spawning / completion
     if (this.waveActive) {
       if (this.enemiesRemainingToSpawn > 0) {
         this.spawnTimer -= dt;
@@ -516,11 +543,15 @@ class InfernoGame {
         }
       } else if (this.enemies.every((e) => !e.alive)) {
         this.waveActive = false;
-        this.hud.setObjective('Area clear — regrouping…');
+        this.hud.setObjective(`Area clear — wave ${this.wave} complete`);
         setTimeout(() => { if (this.state === 'playing') this._nextWave(); }, 2400);
       }
     }
 
+    const livingHostiles = this.enemies.filter((e) => e.alive).length;
+    if (this.waveActive && this.enemiesRemainingToSpawn === 0 && livingHostiles > 0) {
+      this.hud.setObjective(`Wave ${this.wave} — ${livingHostiles} hostile${livingHostiles === 1 ? '' : 's'} remaining`);
+    }
     this.hud.update({ score: this.score, kills: this.kills, wave: this.wave, player: this.player, weapon: this.weapon });
     this.hud.updateRadar(this.enemies, this.player);
   }

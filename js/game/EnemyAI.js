@@ -3,11 +3,13 @@
 // they can leave corridors/rooms and reliably reach the player's area.
 import * as THREE from 'three';
 
-const DETECT_RANGE = 90;
-const LOSE_RANGE = 120;
-const RUN_RANGE = 9;
-const REPATH_INTERVAL = 0.22;
-const WAYPOINT_REACH = 0.7;
+const DETECT_RANGE = 120;
+const LOSE_RANGE = 150;
+const RUN_RANGE = 10;
+const REPATH_INTERVAL = 0.16;
+const WAYPOINT_REACH = 0.8;
+const STUCK_REPATH = 0.8;
+const STUCK_HARD = 2.2;
 const GRID_CELL = 1.0;
 const GRID_MIN = -32;
 const GRID_MAX = 32;
@@ -256,29 +258,44 @@ function getNavigator(level) {
 function moveWithCollision(level, enemy, dx, dz) {
   const radius = enemy.type.radius;
   const pos = enemy.mesh.position;
-  let moved = false;
+  const startX = pos.x;
+  const startZ = pos.z;
 
-  // Try the full move first.
-  _tmpPos.x = pos.x + dx;
-  _tmpPos.z = pos.z + dz;
-  if (!isBlocked(level, _tmpPos.x, _tmpPos.z, radius)) {
-    pos.x = _tmpPos.x;
-    pos.z = _tmpPos.z;
-    moved = true;
-  } else {
-    // Slide against either axis. This prevents getting pinned on corners.
-    _tmpPos.x = pos.x + dx;
-    _tmpPos.z = pos.z;
-    if (!isBlocked(level, _tmpPos.x, _tmpPos.z, radius)) {
-      pos.x = _tmpPos.x;
-      moved = true;
+  const tryMove = (mx, mz) => {
+    const nextX = pos.x + mx;
+    const nextZ = pos.z + mz;
+    if (isBlocked(level, nextX, nextZ, radius)) return false;
+    pos.x = nextX;
+    pos.z = nextZ;
+    return true;
+  };
+
+  let moved = tryMove(dx, dz);
+  if (!moved) {
+    // Axis-separated sliding. Try the larger component first so corners do
+    // not cancel the entire movement vector.
+    if (Math.abs(dx) >= Math.abs(dz)) {
+      moved = tryMove(dx, 0) || tryMove(0, dz);
+    } else {
+      moved = tryMove(0, dz) || tryMove(dx, 0);
     }
+  }
 
-    _tmpPos.x = pos.x;
-    _tmpPos.z = pos.z + dz;
-    if (!isBlocked(level, _tmpPos.x, _tmpPos.z, radius)) {
-      pos.z = _tmpPos.z;
-      moved = true;
+  // A few tiny steering probes make the collision response resilient when a
+  // waypoint is pressed directly into a corner between two AABB colliders.
+  if (!moved) {
+    const len = Math.hypot(dx, dz);
+    if (len > 0.00001) {
+      const sx = dx / len;
+      const sz = dz / len;
+      const probe = len * 0.9;
+      const angles = [0.45, -0.45, 0.9, -0.9, 1.35, -1.35];
+      for (const a of angles) {
+        const c = Math.cos(a), ss = Math.sin(a);
+        const px = (sx * c - sz * ss) * probe;
+        const pz = (sx * ss + sz * c) * probe;
+        if (tryMove(px, pz)) { moved = true; break; }
+      }
     }
   }
 
@@ -286,7 +303,8 @@ function moveWithCollision(level, enemy, dx, dz) {
   level.resolveCollision(safe, radius);
   pos.x = safe.x;
   pos.z = safe.z;
-  return moved;
+
+  return moved || Math.hypot(pos.x - startX, pos.z - startZ) > 0.002;
 }
 
 export function updateEnemyAI(enemy, player, level, dt, onAttackPlayer, audio) {
@@ -300,14 +318,17 @@ export function updateEnemyAI(enemy, player, level, dt, onAttackPlayer, audio) {
   const dist = _toPlayer.length();
   enemy._repathT = (enemy._repathT ?? 0) - dt;
   enemy._stuckT = enemy._stuckT ?? 0;
+  enemy._idleWatchT = enemy._idleWatchT ?? 0;
+  enemy._lastX = enemy._lastX ?? enemy.mesh.position.x;
+  enemy._lastZ = enemy._lastZ ?? enemy.mesh.position.z;
 
-  // Enemies are globally aware of the player. This is intentional: radar and
-  // pursuit now agree, and a hostile cannot sit indefinitely in a side room.
-  if (enemy.state === 'idle' && dist <= DETECT_RANGE) {
+  // Hostiles are globally aware inside the facility. A radar contact must not
+  // remain permanently idle just because it is behind a wall.
+  if ((enemy.state === 'idle' || enemy.state === 'stagger') && dist <= DETECT_RANGE) {
+    if (enemy.state === 'idle') audio?.growl(0.8);
     enemy.state = 'walk';
     enemy._repathT = 0;
     enemy._stuckT = 0;
-    audio?.growl(0.8);
   }
 
   if (enemy.state === 'walk' || enemy.state === 'run') {
@@ -318,6 +339,8 @@ export function updateEnemyAI(enemy, player, level, dt, onAttackPlayer, audio) {
       const speed = enemy.state === 'run' ? enemy.type.runSpeed : enemy.type.walkSpeed;
       const navigator = getNavigator(level);
 
+      // Repath frequently enough to follow a moving player, but only when the
+      // route is actually consumed/expired.
       if (enemy._repathT <= 0 || !enemy._path || enemy._pathIndex >= enemy._path.length) {
         enemy._path = navigator.findPath(enemy.mesh.position, player.position, enemy.type.radius);
         enemy._pathIndex = 0;
@@ -335,29 +358,62 @@ export function updateEnemyAI(enemy, player, level, dt, onAttackPlayer, audio) {
         }
       }
 
-      _dir.set(target.x - enemy.mesh.position.x, 0, target.z - enemy.mesh.position.z).normalize();
-      const moved = moveWithCollision(level, enemy, _dir.x * speed * dt, _dir.z * speed * dt);
+      _dir.set(target.x - enemy.mesh.position.x, 0, target.z - enemy.mesh.position.z);
+      if (_dir.lengthSq() < 0.0001) _dir.copy(_toPlayer);
+      if (_dir.lengthSq() > 0.0001) _dir.normalize();
 
-      if (moved) {
+      const beforeX = enemy.mesh.position.x;
+      const beforeZ = enemy.mesh.position.z;
+      const moved = moveWithCollision(level, enemy, _dir.x * speed * dt, _dir.z * speed * dt);
+      const actualMoved = Math.hypot(enemy.mesh.position.x - beforeX, enemy.mesh.position.z - beforeZ);
+
+      if (moved && actualMoved > 0.002) {
         enemy._stuckT = 0;
       } else {
         enemy._stuckT += dt;
-        if (enemy._stuckT > 0.35) {
-          enemy._path = null;
-          enemy._pathIndex = 0;
-          enemy._repathT = 0;
-          enemy._stuckT = 0;
-          // Small perpendicular nudge if an exact corner keeps rejecting the
-          // desired vector; the next frame gets a fresh A* route.
-          const side = Math.random() < 0.5 ? 1 : -1;
-          _candidate.set(-_dir.z * side, 0, _dir.x * side).multiplyScalar(speed * dt * 0.75);
-          moveWithCollision(level, enemy, _candidate.x, _candidate.z);
+      }
+
+      // Hard stuck protection: discard the route and immediately probe toward
+      // the player from several directions. This prevents the old "frozen at
+      // a corner" dead-end even if the A* route and collision geometry disagree.
+      if (enemy._stuckT >= STUCK_REPATH) {
+        enemy._path = null;
+        enemy._pathIndex = 0;
+        enemy._repathT = 0;
+
+        const side = Math.random() < 0.5 ? 1 : -1;
+        const candidates = [
+          new THREE.Vector3(_dir.x, 0, _dir.z),
+          new THREE.Vector3(-_dir.z * side, 0, _dir.x * side),
+          new THREE.Vector3(_dir.z * side, 0, -_dir.x * side),
+        ];
+        for (const c of candidates) {
+          if (moveWithCollision(level, enemy, c.x * speed * dt, c.z * speed * dt)) break;
         }
+      }
+
+      if (enemy._stuckT >= STUCK_HARD) {
+        // Last-resort recovery: place the hostile on the nearest walkable cell
+        // around its current position, then rebuild the route next frame. It
+        // never teleports across the map, only out of a collision pocket.
+        const cell = worldToCell(enemy.mesh.position.x, enemy.mesh.position.z);
+        const safeCell = nearestWalkable(level, cell, enemy.type.radius, 4);
+        if (safeCell) {
+          const safe = cellToWorld(safeCell.x, safeCell.z);
+          const test = { x: safe.x, z: safe.z };
+          level.resolveCollision(test, enemy.type.radius);
+          if (!isBlocked(level, test.x, test.z, enemy.type.radius)) {
+            enemy.mesh.position.x = test.x;
+            enemy.mesh.position.z = test.z;
+          }
+        }
+        enemy._stuckT = 0;
+        enemy._repathT = 0;
       }
 
       if (_dir.lengthSq() > 0.001) enemy.mesh.rotation.y = Math.atan2(_dir.x, _dir.z);
       enemy.footstepTimer -= dt;
-      if (moved && enemy.footstepTimer <= 0) {
+      if (actualMoved > 0.002 && enemy.footstepTimer <= 0) {
         audio?.footstep('enemy');
         enemy.footstepTimer = enemy.state === 'run' ? 0.28 : 0.46;
       }
@@ -378,6 +434,19 @@ export function updateEnemyAI(enemy, player, level, dt, onAttackPlayer, audio) {
     }
   }
 
+  // Watchdog: if a living hostile somehow falls back to idle while inside the
+  // pursuit radius, it is reactivated automatically within a short window.
+  if (enemy.state === 'idle' && dist <= LOSE_RANGE) {
+    enemy._idleWatchT += dt;
+    if (enemy._idleWatchT > 0.35) {
+      enemy.state = 'walk';
+      enemy._idleWatchT = 0;
+      enemy._repathT = 0;
+    }
+  } else {
+    enemy._idleWatchT = 0;
+  }
+
   if (enemy.state === 'walk' || enemy.state === 'run' || enemy.state === 'attack') {
     enemy.growlTimer -= dt;
     if (enemy.growlTimer <= 0) {
@@ -387,5 +456,11 @@ export function updateEnemyAI(enemy, player, level, dt, onAttackPlayer, audio) {
     }
   }
 
-  enemy.update(dt, { moveSpeed: (enemy.state === 'run' ? enemy.type.runSpeed : enemy.type.walkSpeed) / Math.max(0.001, enemy.type.runSpeed) });
+  enemy.update(dt, {
+    moveSpeed: (enemy.state === 'run' ? enemy.type.runSpeed : enemy.type.walkSpeed) / Math.max(0.001, enemy.type.runSpeed)
+  });
+
+  enemy._lastX = enemy.mesh.position.x;
+  enemy._lastZ = enemy.mesh.position.z;
 }
+
