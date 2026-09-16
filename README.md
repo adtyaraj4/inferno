@@ -1,10 +1,7 @@
 # INFERNO // PROTOCOL
 
-A dark, futuristic game-studio landing page with a fully playable, original
-first-person survival shooter embedded via Three.js — built for a college
-web-development recruitment task.
-
-**INFERNO // PROTOCOL is an entirely original project.** It is inspired by
+An original first-person survival shooter embedded via Three.js — built for a college
+web-development recruitment task. It is inspired by
 the *tone* of 1990s corridor shooters, but every character, enemy, weapon,
 environment, texture treatment, and line of code here is original work.
 No copyrighted characters, maps, textures, logos, sounds, sprites, names,
